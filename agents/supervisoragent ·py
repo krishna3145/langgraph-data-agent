@@ -1,0 +1,292 @@
+"""
+agents/supervisor.py
+
+Supervisor Agent Pattern with Policy-Based Routing
+Routes tasks to specialized sub-agents based on query type
+Mirrors Accenture AI Native JD requirements:
+- Policy-based routing
+- Tool invocation
+- Orchestration
+- Lifecycle observability
+"""
+from typing import TypedDict, List, Literal, Optional
+from datetime import datetime
+import uuid
+import time
+
+
+# ── State Definition ──────────────────────────────────────────────────────────
+
+class AgentState(TypedDict):
+    session_id: str
+    query: str
+    query_type: Literal["data_quality", "pipeline", "reporting", "anomaly", "unknown"]
+    routing_reason: str
+    agent_response: str
+    tool_calls: List[dict]
+    latency_ms: float
+    errors: List[str]
+    timestamp: str
+
+
+# ── Policy Router ─────────────────────────────────────────────────────────────
+
+class PolicyRouter:
+    """
+    Policy-based routing engine
+    Maps query intent to specialized agent
+    Accenture JD: "policy-based routing"
+    """
+
+    POLICIES = {
+        "data_quality": {
+            "keywords": ["null", "missing", "quality", "validate", "schema", "corrupt", "duplicate"],
+            "agent": "DataQualityAgent",
+            "priority": "HIGH",
+            "sla_ms": 2000,
+        },
+        "pipeline": {
+            "keywords": ["pipeline", "dag", "airflow", "spark", "slow", "failed", "stuck", "latency"],
+            "agent": "PipelineAgent",
+            "priority": "HIGH",
+            "sla_ms": 3000,
+        },
+        "anomaly": {
+            "keywords": ["anomaly", "spike", "drift", "unusual", "outlier", "alert", "threshold"],
+            "agent": "AnomalyAgent",
+            "priority": "CRITICAL",
+            "sla_ms": 1000,
+        },
+        "reporting": {
+            "keywords": ["report", "dashboard", "metric", "kpi", "summary", "trend", "weekly", "monthly"],
+            "agent": "ReportingAgent",
+            "priority": "MEDIUM",
+            "sla_ms": 5000,
+        },
+    }
+
+    def route(self, query: str) -> dict:
+        query_lower = query.lower()
+        scores = {}
+
+        for policy_name, config in self.POLICIES.items():
+            score = sum(1 for kw in config["keywords"] if kw in query_lower)
+            if score > 0:
+                scores[policy_name] = score
+
+        if scores:
+            best = max(scores, key=scores.get)
+            config = self.POLICIES[best]
+            return {
+                "query_type": best,
+                "agent": config["agent"],
+                "priority": config["priority"],
+                "sla_ms": config["sla_ms"],
+                "reason": f"Matched {scores[best]} keyword(s) for {best} policy",
+                "confidence": min(scores[best] / 3, 1.0),
+            }
+
+        return {
+            "query_type": "unknown",
+            "agent": "GeneralAgent",
+            "priority": "LOW",
+            "sla_ms": 5000,
+            "reason": "No policy matched — routing to general agent",
+            "confidence": 0.0,
+        }
+
+
+# ── Specialized Agents ────────────────────────────────────────────────────────
+
+class DataQualityAgent:
+    """Handles data quality checks, null validation, schema drift"""
+
+    name = "DataQualityAgent"
+
+    def invoke(self, query: str) -> dict:
+        tools_used = ["great_expectations_runner", "schema_validator", "null_checker"]
+        return {
+            "agent": self.name,
+            "response": f"Running data quality checks: {query[:60]}. Validating schema, null counts, and domain constraints across pipeline layers.",
+            "tools_called": tools_used,
+            "action": "RUN_QUALITY_SUITE",
+            "result": "Quality score: 98.7% | Nulls: 0 | Schema drift: None detected",
+        }
+
+
+class PipelineAgent:
+    """Handles pipeline failures, performance, and orchestration issues"""
+
+    name = "PipelineAgent"
+
+    def invoke(self, query: str) -> dict:
+        tools_used = ["airflow_api", "spark_ui_parser", "cloudwatch_logs"]
+        return {
+            "agent": self.name,
+            "response": f"Diagnosing pipeline issue: {query[:60]}. Checking Airflow DAG status, Spark executor logs, and CloudWatch metrics.",
+            "tools_called": tools_used,
+            "action": "DIAGNOSE_PIPELINE",
+            "result": "Root cause: shuffle partition misconfiguration. Recommended fix: increase spark.sql.shuffle.partitions to 400.",
+        }
+
+
+class AnomalyAgent:
+    """Handles anomaly detection, drift alerts, threshold breaches"""
+
+    name = "AnomalyAgent"
+
+    def invoke(self, query: str) -> dict:
+        tools_used = ["evidently_drift_detector", "cloudwatch_metrics", "alerting_system"]
+        return {
+            "agent": self.name,
+            "response": f"Investigating anomaly: {query[:60]}. Running drift detection and threshold analysis.",
+            "tools_called": tools_used,
+            "action": "DETECT_ANOMALY",
+            "result": "Data drift detected in 3 features (amount, velocity_24h, is_international). Retraining recommended.",
+        }
+
+
+class ReportingAgent:
+    """Handles report generation and metric aggregation"""
+
+    name = "ReportingAgent"
+
+    def invoke(self, query: str) -> dict:
+        tools_used = ["snowflake_connector", "tableau_api", "dbt_runner"]
+        return {
+            "agent": self.name,
+            "response": f"Generating report: {query[:60]}. Querying Snowflake Gold layer and refreshing Tableau dashboard.",
+            "tools_called": tools_used,
+            "action": "GENERATE_REPORT",
+            "result": "Report generated: 15,420 records | Export: dashboard_weekly_20260404.pdf",
+        }
+
+
+class GeneralAgent:
+    """Fallback for unclassified queries"""
+
+    name = "GeneralAgent"
+
+    def invoke(self, query: str) -> dict:
+        return {
+            "agent": self.name,
+            "response": f"Processing general query: {query[:60]}.",
+            "tools_called": ["general_knowledge_base"],
+            "action": "GENERAL_RESPONSE",
+            "result": "Query handled by general fallback agent.",
+        }
+
+
+# ── Supervisor Orchestrator ───────────────────────────────────────────────────
+
+class SupervisorOrchestrator:
+    """
+    Master orchestrator for multi-agent data engineering system
+    Implements: routing → tool invocation → response → observability
+
+    Accenture JD alignment:
+    - Policy-based routing: PolicyRouter
+    - Tool invocation: per-agent tool_calls
+    - Orchestration: SupervisorOrchestrator
+    - Lifecycle observability: run_traces
+    """
+
+    AGENTS = {
+        "DataQualityAgent": DataQualityAgent(),
+        "PipelineAgent": PipelineAgent(),
+        "AnomalyAgent": AnomalyAgent(),
+        "ReportingAgent": ReportingAgent(),
+        "GeneralAgent": GeneralAgent(),
+    }
+
+    def __init__(self):
+        self.router = PolicyRouter()
+        self.run_traces: List[AgentState] = []
+
+    def run(self, query: str, session_id: str = None) -> AgentState:
+        """Execute full agent pipeline with observability tracing"""
+        start = time.time()
+        session_id = session_id or str(uuid.uuid4())[:8]
+
+        # Step 1: Policy routing
+        routing = self.router.route(query)
+        print(f"\n[{session_id}] Query: {query[:60]}...")
+        print(f"[{session_id}] Routed to: {routing['agent']} | Priority: {routing['priority']} | Confidence: {routing['confidence']:.0%}")
+        print(f"[{session_id}] Reason: {routing['reason']}")
+
+        # Step 2: Agent invocation
+        agent = self.AGENTS[routing["agent"]]
+        result = agent.invoke(query)
+
+        # Step 3: SLA check
+        latency_ms = (time.time() - start) * 1000
+        sla_breached = latency_ms > routing["sla_ms"]
+        if sla_breached:
+            print(f"[{session_id}] ⚠️  SLA BREACH: {latency_ms:.0f}ms > {routing['sla_ms']}ms")
+        else:
+            print(f"[{session_id}] ✅ SLA OK: {latency_ms:.1f}ms < {routing['sla_ms']}ms")
+
+        print(f"[{session_id}] Result: {result['result']}")
+
+        # Step 4: Build trace for observability
+        state: AgentState = {
+            "session_id": session_id,
+            "query": query,
+            "query_type": routing["query_type"],
+            "routing_reason": routing["reason"],
+            "agent_response": result["response"],
+            "tool_calls": result.get("tools_called", []),
+            "latency_ms": round(latency_ms, 2),
+            "errors": [] if not sla_breached else [f"SLA breached: {latency_ms:.0f}ms"],
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        self.run_traces.append(state)
+        return state
+
+    def get_observability_report(self) -> dict:
+        """Lifecycle observability report — Accenture JD requirement"""
+        if not self.run_traces:
+            return {"status": "no_traces"}
+
+        return {
+            "total_runs": len(self.run_traces),
+            "avg_latency_ms": round(sum(t["latency_ms"] for t in self.run_traces) / len(self.run_traces), 1),
+            "sla_breach_rate": round(sum(1 for t in self.run_traces if t["errors"]) / len(self.run_traces), 3),
+            "query_type_distribution": {
+                qt: sum(1 for t in self.run_traces if t["query_type"] == qt)
+                for qt in set(t["query_type"] for t in self.run_traces)
+            },
+            "unique_sessions": len(set(t["session_id"] for t in self.run_traces)),
+            "tools_invoked": list(set(
+                tool for t in self.run_traces for tool in t["tool_calls"]
+            )),
+        }
+
+
+# ── Demo ──────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    orchestrator = SupervisorOrchestrator()
+
+    test_queries = [
+        "Check for null values in the patient_id column across the Silver layer",
+        "Why is the Airflow DAG for clinical ingestion running 3x slower than usual?",
+        "I'm seeing a spike in transaction amounts — possible data drift or anomaly?",
+        "Generate the weekly KPI report for clinical operations leadership",
+        "What is the retention policy for our Delta Lake tables?",
+    ]
+
+    print("=" * 65)
+    print("SUPERVISOR AGENT ORCHESTRATOR — DEMO")
+    print("=" * 65)
+
+    for query in test_queries:
+        orchestrator.run(query)
+
+    print("\n" + "=" * 65)
+    print("OBSERVABILITY REPORT")
+    print("=" * 65)
+    report = orchestrator.get_observability_report()
+    for k, v in report.items():
+        print(f"  {k}: {v}")
